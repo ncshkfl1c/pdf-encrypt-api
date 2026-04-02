@@ -1,19 +1,16 @@
-from flask import Flask, request, jsonify
-from pypdf import PdfReader, PdfWriter
-import base64, io
-
-app = Flask(__name__)
-
-@app.route('/')
-def home():
-    return "API is running"
-
-@app.route('/encrypt', methods=['POST'])
+@app.route('/encrypt', methods=['GET', 'POST'])
 def encrypt_pdf():
+    if request.method == 'GET':
+        return "API OK - use POST"
+
     try:
-        data = request.json
-        password = data.get("password", "123456")
+        data = request.get_json(force=True)
+
         file_base64 = data.get("file")
+        password = data.get("password", "123456")
+
+        import base64, io
+        from pypdf import PdfReader, PdfWriter
 
         file_bytes = base64.b64decode(file_base64)
         reader = PdfReader(io.BytesIO(file_bytes))
@@ -33,4 +30,4 @@ def encrypt_pdf():
         })
 
     except Exception as e:
-        return jsonify({"status": "error", "message": str(e)})
+        return jsonify({"error": str(e)}), 400
