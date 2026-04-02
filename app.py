@@ -28,7 +28,7 @@ def process_file():
         # 1. HTML → Excel
         # =========================
         if html:
-            # 🔥 CLEAN HTML (rất quan trọng)
+            # 🔥 CLEAN HTML
             html = html.replace('\n', '').replace('\t', '')
             html = html.replace('<br>', ' ').replace('<br/>', ' ').replace('<br />', ' ')
 
@@ -46,14 +46,13 @@ def process_file():
 
             excel_bytes = excel_stream.getvalue()
 
-            # 🔐 Encrypt Excel nếu có password
+            # 🔐 Encrypt Excel (FIX CHUẨN)
             if password:
                 input_stream = io.BytesIO(excel_bytes)
                 output_stream = io.BytesIO()
 
                 office = msoffcrypto.OfficeFile(input_stream)
-                office.encrypt(password=password)
-                office.save(output_stream)
+                office.encrypt(password, output_stream)   # ✅ FIX QUAN TRỌNG
 
                 result_bytes = output_stream.getvalue()
             else:
@@ -66,7 +65,6 @@ def process_file():
         # =========================
         elif file_base64:
 
-            # remove prefix nếu có
             if file_base64.startswith("data:"):
                 file_base64 = file_base64.split(",")[1]
 
@@ -96,8 +94,7 @@ def process_file():
                     output_stream = io.BytesIO()
 
                     office = msoffcrypto.OfficeFile(input_stream)
-                    office.encrypt(password=password)
-                    office.save(output_stream)
+                    office.encrypt(password, output_stream)   # ✅ FIX
 
                     result_bytes = output_stream.getvalue()
                 else:
