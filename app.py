@@ -1,15 +1,9 @@
 from flask import Flask, request, jsonify
 import base64, io
 
-import pandas as pd
-import msoffcrypto
-
 from pypdf import PdfReader, PdfWriter
-
-from openpyxl import load_workbook
-from openpyxl.worksheet.table import Table, TableStyleInfo
-from openpyxl.styles import Alignment
-from openpyxl.utils import get_column_letter
+import msoffcrypto
+import pandas as pd
 
 app = Flask(__name__)
 
@@ -30,78 +24,45 @@ def process_file():
         result_bytes = None
         file_type = None
 
-        # =====================================================
-        # 1. HTML → EXCEL (TABLE + FORMAT + ENCRYPT)
-        # =====================================================
+        # =========================
+        # 1. HTML → Excel
+        # =========================
         if html:
-            # Clean HTML
+            # 🔥 CLEAN HTML
             html = html.replace('\n', '').replace('\t', '')
-            html = html.replace('<br>', '\n').replace('<br/>', '\n').replace('<br />', '\n')
+            html = html.replace('<br>', ' ').replace('<br/>', ' ').replace('<br />', ' ')
 
-            # Read HTML
+            # 🔥 FIX pandas đọc đúng string
             tables = pd.read_html(io.StringIO(html))
-            if not tables:
-                return jsonify({"error": "No table found"}), 400
 
-            # Write Excel
+            if not tables:
+                return jsonify({"error": "No table found in HTML"}), 400
+
             excel_stream = io.BytesIO()
+
             with pd.ExcelWriter(excel_stream, engine='openpyxl') as writer:
                 for i, table in enumerate(tables):
                     table.to_excel(writer, sheet_name=f"Sheet{i+1}", index=False)
 
-            # Load lại để format
-            excel_stream.seek(0)
-            wb = load_workbook(excel_stream)
+            excel_bytes = excel_stream.getvalue()
 
-            for idx, ws in enumerate(wb.worksheets, start=1):
-                max_row = ws.max_row
-                max_col = ws.max_column
-
-                # Create table
-                table_range = f"A1:{get_column_letter(max_col)}{max_row}"
-                tab = Table(displayName=f"Table{idx}", ref=table_range)
-
-                style = TableStyleInfo(
-                    name="TableStyleMedium9",
-                    showRowStripes=True
-                )
-                tab.tableStyleInfo = style
-                ws.add_table(tab)
-
-                # Format
-                for col in ws.columns:
-                    max_length = 0
-                    col_letter = col[0].column_letter
-
-                    for cell in col:
-                        if cell.value:
-                            cell.alignment = Alignment(wrap_text=True)
-                            length = len(str(cell.value))
-                            if length > max_length:
-                                max_length = length
-
-                    ws.column_dimensions[col_letter].width = min(max_length + 2, 50)
-
-            # Save formatted Excel
-            formatted_stream = io.BytesIO()
-            wb.save(formatted_stream)
-            result_bytes = formatted_stream.getvalue()
-
-            # Encrypt Excel
+            # 🔐 Encrypt Excel (FIX CHUẨN)
             if password:
-                input_stream = io.BytesIO(result_bytes)
+                input_stream = io.BytesIO(excel_bytes)
                 output_stream = io.BytesIO()
 
                 office = msoffcrypto.OfficeFile(input_stream)
-                office.encrypt(password, output_stream)
+                office.encrypt(password, output_stream)   # ✅ FIX QUAN TRỌNG
 
                 result_bytes = output_stream.getvalue()
+            else:
+                result_bytes = excel_bytes
 
             file_type = "excel"
 
-        # =====================================================
+        # =========================
         # 2. FILE (PDF / EXCEL)
-        # =====================================================
+        # =========================
         elif file_base64:
 
             if file_base64.startswith("data:"):
@@ -109,7 +70,7 @@ def process_file():
 
             file_bytes = base64.b64decode(file_base64)
 
-            # ================= PDF =================
+            # ===== PDF =====
             if file_name.endswith(".pdf") or file_bytes[:4] == b'%PDF':
                 reader = PdfReader(io.BytesIO(file_bytes))
                 writer = PdfWriter()
@@ -126,14 +87,14 @@ def process_file():
                 result_bytes = output.getvalue()
                 file_type = "pdf"
 
-            # ================= EXCEL =================
+            # ===== EXCEL =====
             elif file_name.endswith(".xlsx") or file_bytes[:2] == b'PK':
                 if password:
                     input_stream = io.BytesIO(file_bytes)
                     output_stream = io.BytesIO()
 
                     office = msoffcrypto.OfficeFile(input_stream)
-                    office.encrypt(password, output_stream)
+                    office.encrypt(password, output_stream)   # ✅ FIX
 
                     result_bytes = output_stream.getvalue()
                 else:
@@ -147,9 +108,9 @@ def process_file():
         else:
             return jsonify({"error": "No input provided"}), 400
 
-        # =====================================================
-        # RETURN
-        # =====================================================
+        # =========================
+        # 3. RETURN
+        # =========================
         return jsonify({
             "status": "success",
             "type": file_type,
