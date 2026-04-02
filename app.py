@@ -28,10 +28,12 @@ def process_file():
         # 1. HTML → Excel
         # =========================
         if html:
-            # clean HTML
+            # 🔥 CLEAN HTML (rất quan trọng)
             html = html.replace('\n', '').replace('\t', '')
+            html = html.replace('<br>', ' ').replace('<br/>', ' ').replace('<br />', ' ')
 
-            tables = pd.read_html(html)
+            # 🔥 FIX pandas đọc đúng string
+            tables = pd.read_html(io.StringIO(html))
 
             if not tables:
                 return jsonify({"error": "No table found in HTML"}), 400
@@ -44,7 +46,7 @@ def process_file():
 
             excel_bytes = excel_stream.getvalue()
 
-            # 👉 Encrypt nếu có password
+            # 🔐 Encrypt Excel nếu có password
             if password:
                 input_stream = io.BytesIO(excel_bytes)
                 output_stream = io.BytesIO()
