@@ -1,5 +1,5 @@
 from flask import Flask, request, jsonify
-import base64, io, tempfile
+import base64, io
 
 from pypdf import PdfReader, PdfWriter
 import msoffcrypto
@@ -25,29 +25,52 @@ def process_file():
         file_type = None
 
         # =========================
-        # 1. HTML → EXCEL
+        # 1. HTML → Excel
         # =========================
         if html:
+            # clean HTML
+            html = html.replace('\n', '').replace('\t', '')
+
             tables = pd.read_html(html)
 
-            output = io.BytesIO()
-            with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            if not tables:
+                return jsonify({"error": "No table found in HTML"}), 400
+
+            excel_stream = io.BytesIO()
+
+            with pd.ExcelWriter(excel_stream, engine='openpyxl') as writer:
                 for i, table in enumerate(tables):
                     table.to_excel(writer, sheet_name=f"Sheet{i+1}", index=False)
 
-            result_bytes = output.getvalue()
+            excel_bytes = excel_stream.getvalue()
+
+            # 👉 Encrypt nếu có password
+            if password:
+                input_stream = io.BytesIO(excel_bytes)
+                output_stream = io.BytesIO()
+
+                office = msoffcrypto.OfficeFile(input_stream)
+                office.encrypt(password=password)
+                office.save(output_stream)
+
+                result_bytes = output_stream.getvalue()
+            else:
+                result_bytes = excel_bytes
+
             file_type = "excel"
 
         # =========================
         # 2. FILE (PDF / EXCEL)
         # =========================
         elif file_base64:
+
+            # remove prefix nếu có
             if file_base64.startswith("data:"):
                 file_base64 = file_base64.split(",")[1]
 
             file_bytes = base64.b64decode(file_base64)
 
-            # detect theo tên file
+            # ===== PDF =====
             if file_name.endswith(".pdf") or file_bytes[:4] == b'%PDF':
                 reader = PdfReader(io.BytesIO(file_bytes))
                 writer = PdfWriter()
@@ -64,23 +87,17 @@ def process_file():
                 result_bytes = output.getvalue()
                 file_type = "pdf"
 
+            # ===== EXCEL =====
             elif file_name.endswith(".xlsx") or file_bytes[:2] == b'PK':
-                with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
-                    tmp.write(file_bytes)
-                    input_path = tmp.name
-
-                output_path = input_path.replace(".xlsx", "_enc.xlsx")
-
                 if password:
-                    with open(input_path, "rb") as f_in:
-                        office = msoffcrypto.OfficeFile(f_in)
-                        office.encrypt(password=password)
+                    input_stream = io.BytesIO(file_bytes)
+                    output_stream = io.BytesIO()
 
-                        with open(output_path, "wb") as f_out:
-                            office.save(f_out)
+                    office = msoffcrypto.OfficeFile(input_stream)
+                    office.encrypt(password=password)
+                    office.save(output_stream)
 
-                    with open(output_path, "rb") as f:
-                        result_bytes = f.read()
+                    result_bytes = output_stream.getvalue()
                 else:
                     result_bytes = file_bytes
 
@@ -103,3 +120,7 @@ def process_file():
 
     except Exception as e:
         return jsonify({"error": str(e)}), 400
+
+
+if __name__ == '__main__':
+    app.run()
