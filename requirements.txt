@@ -2,3 +2,6 @@ flask
 pypdf
 gunicorn
 msoffcrypto-tool
+pandas
+openpyxl
+lxml
