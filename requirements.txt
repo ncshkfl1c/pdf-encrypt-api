@@ -7,4 +7,3 @@ html5lib
 beautifulsoup4
 msoffcrypto-tool
 pypdf
-datetime
