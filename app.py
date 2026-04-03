@@ -1,9 +1,9 @@
 from flask import Flask, request, jsonify
 import base64, io, traceback
+from datetime import datetime
 
 import pandas as pd
 import msoffcrypto
-
 from pypdf import PdfReader, PdfWriter
 
 from openpyxl import load_workbook
@@ -11,7 +11,22 @@ from openpyxl.worksheet.table import Table, TableStyleInfo
 from openpyxl.styles import Alignment
 from openpyxl.utils import get_column_letter
 
-from datetime import datetime
+app = Flask(__name__)
+
+# =========================
+# HEALTH CHECK (KEEP ALIVE)
+# =========================
+@app.route('/', methods=['GET'])
+def home():
+    return "API is running"
+
+@app.route('/health', methods=['GET'])
+def health():
+    return jsonify({
+        "status": "ok",
+        "time": datetime.utcnow().isoformat(),
+        "service": "pdf-excel-api"
+    }), 200
 
 # =========================
 # UTIL
@@ -27,49 +42,37 @@ def retry(func, times=2):
     for i in range(times):
         try:
             return func()
-        except Exception as e:
+        except:
             if i == times - 1:
                 raise
 
 # =========================
-# HTML → Excel (Safe)
+# HTML → Excel
 # =========================
-def process_html_to_excel(html, password):
-
-    # CLEAN HTML
+def process_html(html, password):
     html = html.replace('\n', '').replace('\t', '')
     html = html.replace('<br>', '\n').replace('<br/>', '\n').replace('<br />', '\n')
 
-    # Parse HTML
-    try:
-        tables = pd.read_html(io.StringIO(html))
-    except Exception as e:
-        raise Exception(f"HTML parse failed: {str(e)}")
-
+    tables = pd.read_html(io.StringIO(html))
     if not tables:
-        raise Exception("No table found in HTML")
+        raise Exception("No table found")
 
-    # Write Excel
     excel_stream = io.BytesIO()
+
     with pd.ExcelWriter(excel_stream, engine='openpyxl') as writer:
         for i, table in enumerate(tables):
             table.to_excel(writer, sheet_name=f"Sheet{i+1}", index=False)
 
     excel_stream.seek(0)
-
-    # Format Excel
-    try:
-        wb = load_workbook(excel_stream)
-    except Exception as e:
-        raise Exception(f"Excel load failed: {str(e)}")
+    wb = load_workbook(excel_stream)
 
     for idx, ws in enumerate(wb.worksheets, start=1):
         max_row = ws.max_row
         max_col = ws.max_column
 
         table_range = f"A1:{get_column_letter(max_col)}{max_row}"
-
         tab = Table(displayName=f"Table{idx}", ref=table_range)
+
         style = TableStyleInfo(name="TableStyleMedium9", showRowStripes=True)
         tab.tableStyleInfo = style
         ws.add_table(tab)
@@ -85,47 +88,39 @@ def process_html_to_excel(html, password):
 
             ws.column_dimensions[col_letter].width = min(max_length + 2, 50)
 
-    # Save formatted
-    formatted_stream = io.BytesIO()
-    wb.save(formatted_stream)
+    output_stream = io.BytesIO()
+    wb.save(output_stream)
+    result_bytes = output_stream.getvalue()
 
-    result_bytes = formatted_stream.getvalue()
-
-    # Encrypt Excel
     if password:
-        try:
-            input_stream = io.BytesIO(result_bytes)
-            output_stream = io.BytesIO()
+        input_stream = io.BytesIO(result_bytes)
+        output_stream = io.BytesIO()
 
-            office = msoffcrypto.OfficeFile(input_stream)
-            office.encrypt(password, output_stream)
+        office = msoffcrypto.OfficeFile(input_stream)
+        office.encrypt(password, output_stream)
 
-            result_bytes = output_stream.getvalue()
-        except Exception as e:
-            raise Exception(f"Excel encrypt failed: {str(e)}")
+        result_bytes = output_stream.getvalue()
 
     return result_bytes, "excel"
 
 # =========================
-# PDF (Safe)
+# PDF
 # =========================
 def process_pdf(file_bytes, password):
 
     if file_bytes[:4] != b'%PDF':
-        raise Exception("Invalid PDF file")
+        raise Exception("Invalid PDF")
 
     def _process():
         reader = PdfReader(io.BytesIO(file_bytes))
 
-        # xử lý nếu PDF đã bị encrypt
         if reader.is_encrypted:
             try:
                 reader.decrypt("")
             except:
-                raise Exception("PDF is encrypted and cannot be opened")
+                raise Exception("PDF locked")
 
         writer = PdfWriter()
-
         for page in reader.pages:
             writer.add_page(page)
 
@@ -140,41 +135,25 @@ def process_pdf(file_bytes, password):
     return retry(_process), "pdf"
 
 # =========================
-# EXCEL (Safe)
+# EXCEL
 # =========================
 def process_excel(file_bytes, password):
-
     if not password:
         return file_bytes, "excel"
 
-    try:
-        input_stream = io.BytesIO(file_bytes)
-        output_stream = io.BytesIO()
+    input_stream = io.BytesIO(file_bytes)
+    output_stream = io.BytesIO()
 
-        office = msoffcrypto.OfficeFile(input_stream)
-        office.encrypt(password, output_stream)
+    office = msoffcrypto.OfficeFile(input_stream)
+    office.encrypt(password, output_stream)
 
-        return output_stream.getvalue(), "excel"
-    except Exception as e:
-        raise Exception(f"Excel encrypt failed: {str(e)}")
-        
-@app.route('/health', methods=['GET'])
-def health():
-    return jsonify({
-        "status": "ok",
-        "message": "API is alive",
-        "time": datetime.utcnow().isoformat(),
-        "service": "pdf-excel-api"
-    }), 200
-
-app = Flask(__name__)
-
+    return output_stream.getvalue(), "excel"
 
 # =========================
 # MAIN API
 # =========================
 @app.route('/process', methods=['POST'])
-def process_file():
+def process():
     try:
         data = request.get_json(force=True)
 
@@ -182,28 +161,19 @@ def process_file():
         html = data.get("html")
         password = data.get("password", "")
 
-        # VALIDATE INPUT
         if not html and not file_base64:
             return jsonify({"error": "No input"}), 400
 
-        # =========================
-        # HTML FLOW
-        # =========================
+        # ===== HTML =====
         if html:
-            if len(html) < 50:
-                return jsonify({"error": "HTML too short"}), 400
+            result_bytes, file_type = retry(lambda: process_html(html, password))
 
-            result_bytes, file_type = retry(lambda: process_html_to_excel(html, password))
-
-        # =========================
-        # FILE FLOW
-        # =========================
+        # ===== FILE =====
         else:
             if file_base64.startswith("data:"):
                 file_base64 = file_base64.split(",")[1]
 
             file_bytes = base64.b64decode(file_base64)
-            file_bytes = bytes(file_bytes)
 
             if len(file_bytes) < 100:
                 return jsonify({"error": "File corrupted"}), 400
@@ -220,11 +190,8 @@ def process_file():
                 result_bytes, file_type = process_excel(file_bytes, password)
 
             else:
-                return jsonify({"error": "Unsupported file format"}), 400
+                return jsonify({"error": "Unsupported file"}), 400
 
-        # =========================
-        # RETURN
-        # =========================
         return jsonify({
             "status": "success",
             "type": file_type,
@@ -236,6 +203,8 @@ def process_file():
         print(traceback.format_exc())
         return jsonify({"error": str(e)}), 400
 
-
+# =========================
+# RUN
+# =========================
 if __name__ == '__main__':
     app.run()
