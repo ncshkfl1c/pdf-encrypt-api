@@ -11,6 +11,17 @@ from openpyxl.worksheet.table import Table, TableStyleInfo
 from openpyxl.styles import Alignment
 from openpyxl.utils import get_column_letter
 
+from datetime import datetime
+
+@app.route('/health', methods=['GET'])
+def health():
+    return jsonify({
+        "status": "ok",
+        "message": "API is alive",
+        "time": datetime.utcnow().isoformat(),
+        "service": "pdf-excel-api"
+    }), 200
+
 app = Flask(__name__)
 
 # =========================
