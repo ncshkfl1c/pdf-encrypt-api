@@ -13,17 +13,6 @@ from openpyxl.utils import get_column_letter
 
 from datetime import datetime
 
-@app.route('/health', methods=['GET'])
-def health():
-    return jsonify({
-        "status": "ok",
-        "message": "API is alive",
-        "time": datetime.utcnow().isoformat(),
-        "service": "pdf-excel-api"
-    }), 200
-
-app = Flask(__name__)
-
 # =========================
 # UTIL
 # =========================
@@ -168,6 +157,18 @@ def process_excel(file_bytes, password):
         return output_stream.getvalue(), "excel"
     except Exception as e:
         raise Exception(f"Excel encrypt failed: {str(e)}")
+        
+@app.route('/health', methods=['GET'])
+def health():
+    return jsonify({
+        "status": "ok",
+        "message": "API is alive",
+        "time": datetime.utcnow().isoformat(),
+        "service": "pdf-excel-api"
+    }), 200
+
+app = Flask(__name__)
+
 
 # =========================
 # MAIN API
