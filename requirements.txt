@@ -1,9 +1,7 @@
 flask
-gunicorn
 pandas
 openpyxl
-lxml
-html5lib
-beautifulsoup4
-msoffcrypto-tool
 pypdf
+msoffcrypto-tool
+gunicorn
+lxml
